@@ -1,0 +1,257 @@
+/*******************************************************************************************
+  SIMPL+ Module Information
+  (Fill in comments below)
+*******************************************************************************************/
+/*
+Dealer Name: Control Concepts, Inc.
+System Name: SNMP OctetString Control Module v1.1
+System Number:
+Programmer: JJM
+Comments:
+*/
+
+/*******************************************************************************************
+  Compiler Directives
+  (Uncomment and declare compiler directives as needed)
+*******************************************************************************************/
+#DEFINE_CONSTANT TRUE 1
+#DEFINE_CONSTANT FALSE 0
+#DEFINE_CONSTANT MAX_COMMAND_SIZE 150
+
+#DEFINE_CONSTANT MAX_OID_STRING_SIZE 128
+#DEFINE_CONSTANT MAX_OCTET_STRING_SIZE 128
+
+#HELP_PDF_FILE "SNMP OctetString Control Module v1.1 Help.pdf"
+
+#DEFAULT_VOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+#ENCODING_ASCII
+
+/*******************************************************************************************
+  Include Libraries
+  (Uncomment and include additional libraries as needed)
+*******************************************************************************************/
+
+/*******************************************************************************************
+  DIGITAL, ANALOG and SERIAL INPUTS and OUTPUTS
+  (Uncomment and declare inputs and outputs as needed)
+*******************************************************************************************/
+DIGITAL_INPUT _SKIP_; 
+DIGITAL_INPUT Get_Value, Set_Value,_SKIP_; 
+STRING_INPUT Value[MAX_OCTET_STRING_SIZE], _SKIP_;
+BUFFER_INPUT From_Processor[1024];
+
+DIGITAL_OUTPUT _SKIP_;
+DIGITAL_OUTPUT Is_Initialized, _SKIP_, _SKIP_; 
+STRING_OUTPUT Value_FB, _SKIP_;
+STRING_OUTPUT To_Processor;
+
+/*******************************************************************************************
+  SOCKETS
+  (Uncomment and define socket definitions as needed)
+*******************************************************************************************/
+
+/*******************************************************************************************
+  Parameters
+  (Uncomment and declare parameters as needed)
+*******************************************************************************************/
+STRING_PARAMETER SNMP_OID[MAX_OID_STRING_SIZE];
+
+/*******************************************************************************************
+  Parameter Properties
+  (Uncomment and declare parameter properties as needed)
+*******************************************************************************************/
+#BEGIN_PARAMETER_PROPERTIES SNMP_OID
+   propValidUnits = unitString;
+   propDefaultUnit = unitString;
+   propDefaultValue = "";
+   propShortDescription = "SNMP OID Address";
+#END_PARAMETER_PROPERTIES
+
+/*******************************************************************************************
+  Structure Definitions
+  (Uncomment and define structure definitions as needed)
+  Note:  Be sure to initialize all declared STRING variables as needed
+         For example, in Function Main: struct.myString = "";
+*******************************************************************************************/
+
+/*******************************************************************************************
+  Global Variables
+  (Uncomment and declare global variables as needed)
+  Note:  Be sure to initialize all declared STRING variables as needed
+         For example, in Function Main: myString = "";
+*******************************************************************************************/
+INTEGER myID;
+
+INTEGER parsingModuleBusy;
+STRING parsedModuleMsg[254];
+INTEGER responseModuleMsgID;         
+STRING parsedModuleType[MAX_COMMAND_SIZE];
+STRING parsedModuleOID[MAX_COMMAND_SIZE];
+STRING parsedModuleValue[MAX_OCTET_STRING_SIZE];
+
+STRING trash[MAX_COMMAND_SIZE];
+
+/*******************************************************************************************
+  Functions
+  (Add any additional functions here)
+  Note:  Functions must be physically placed before the location in
+         the code that calls them.
+*******************************************************************************************/
+////////////////////////////////////////////////////////////
+// Module Communication Method Helpers
+////////////////////////////////////////////////////////////
+String_Function getBoundString(STRING source, STRING startString, STRING endString)
+{
+	INTEGER startIndex;
+	INTEGER endIndex;
+	STRING response[MAX_COMMAND_SIZE];
+                                     
+    response = "";
+
+	IF (LEN(source) > 0)
+	{
+		startIndex = FIND(startString, source);
+		endIndex = FIND(endString, source, startIndex + 1);
+	
+		IF (startIndex > 0 && startIndex < endIndex)
+		{
+			startIndex = startIndex + LEN(startString);
+				
+			response = MID(source, startIndex, endIndex - startIndex);
+		}
+	}
+
+	RETURN (response);
+}
+ 
+////////////////////////////////////////////////////////////
+// Initialize Method Helpers	
+////////////////////////////////////////////////////////////
+Function getInitialized()
+{
+	IF (myID > 0)
+		MakeString(To_Processor,"GET<%d|%s>", myID, SNMP_OID); 
+}
+
+Function updateModuleFeedback(STRING value)
+{
+	Value_FB = value;
+}
+                                                                                                                  
+////////////////////////////////////////////////////////////
+// String Method Helpers
+////////////////////////////////////////////////////////////
+Integer_Function startsWith(STRING MATCH_STRING, STRING SOURCE_STRING)
+{
+	RETURN (FIND(MATCH_STRING, SOURCE_STRING) = 1); 
+}
+
+Integer_Function contains(STRING MATCH_STRING, STRING SOURCE_STRING)
+{
+	RETURN (FIND(MATCH_STRING, SOURCE_STRING) > 0); 
+}
+               
+Long_Integer_Function ATOL_Signed(STRING value)
+{
+	IF (startsWith("-", value))
+		RETURN (0-ATOL(value));
+	ELSE
+		RETURN (ATOL(value));
+}
+/*******************************************************************************************
+  Event Handlers
+  (Uncomment and declare additional event handlers as needed)
+*******************************************************************************************/
+PUSH Get_Value
+{
+	//GET<ID|OID>
+	IF (myID > 0)
+		MakeString(To_Processor,"GET<%d|%s>", myID, SNMP_OID); 
+}
+
+PUSH Set_Value
+{
+	//SET<ID|TYPE|OID|VALUE>
+	IF (myID > 0)
+		MakeString(To_Processor,"SET<%d|STRING|%s|%s>", myID, SNMP_OID, Value); 
+}
+
+CHANGE From_Processor
+{
+	IF (parsingModuleBusy = FALSE)
+	{
+		parsingModuleBusy = TRUE;
+                       
+		WHILE (TRUE)
+		{           
+			parsedModuleMsg = GATHER(">", From_Processor);
+
+			IF (contains(parsedModuleMsg, From_Processor))
+				clearBuffer(From_Processor);
+
+			IF (LEN(parsedModuleMsg) > 0)
+			{
+				//REGISTER<ID>
+				IF (contains("REGISTER", parsedModuleMsg))
+				{
+					myID = ATOI(getBoundString(parsedModuleMsg,"<",">"));
+					
+					IF (myID > 0)
+						MakeString(To_Processor,"REGISTER<%d>", myID);
+				}
+				//INIT<ID>
+				ELSE IF (contains("INIT", parsedModuleMsg))
+				{
+					Is_Initialized = FALSE;
+					getInitialized();
+				}
+				//RESPONSE<ID|OID|VALUE>
+				ELSE IF (contains("RESPONSE", parsedModuleMsg))
+				{
+					responseModuleMsgID = ATOI(getBoundString(parsedModuleMsg,"<","|")); 
+        
+					parsedModuleOID = getBoundString(parsedModuleMsg,"|","|");
+					TRASH = REMOVE("|",parsedModuleMsg);
+
+					parsedModuleValue = getBoundString(parsedModuleMsg,"|",">");
+
+					updateModuleFeedback(parsedModuleValue);
+                                                
+					IF (myID > 0)
+						MakeString(To_Processor,"RESPONSE_OK<%d>", myID);           
+
+					IF (Is_Initialized = FALSE)
+					{
+						Is_Initialized = TRUE;
+
+						IF (myID > 0)
+							MakeString(To_Processor,"INIT_DONE<%d>", myID);
+					}            					
+				}
+			}
+		}
+
+		parsingModuleBusy = FALSE;
+	}
+}
+
+/*******************************************************************************************
+  Main()
+  Uncomment and place one-time startup code here
+  (This code will get called when the system starts up)
+*******************************************************************************************/
+
+Function Main()
+{
+	parsingModuleBusy = FALSE;
+
+	Is_Initialized = FALSE;
+
+	myID = 0;
+
+    // WaitForInitializationComplete();
+}
+
+

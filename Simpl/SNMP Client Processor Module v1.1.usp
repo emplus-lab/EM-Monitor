@@ -1,0 +1,1520 @@
+/*******************************************************************************************
+  SIMPL+ Module Information
+  (Fill in comments below)
+*******************************************************************************************/
+/*
+Dealer Name: Control Concepts, Inc.
+System Name: SNMP Client Processor Module v1.1
+System Number:
+Programmer: JJM
+Comments:
+*/
+
+/*******************************************************************************************
+  Compiler Directives
+  (Uncomment and declare compiler directives as needed)
+*******************************************************************************************/
+#DEFINE_CONSTANT MAX_NULL_ENCODING_SIZE 0
+#DEFINE_CONSTANT MAX_NULL_ENCODING_RESPONSE_SIZE 2
+#DEFINE_CONSTANT MAX_LENGTH_ENCODING_SIZE 4
+#DEFINE_CONSTANT MAX_LENGTH_ENCODING_RESPONSE_SIZE 6
+#DEFINE_CONSTANT MAX_INTEGER_ENCODING_SIZE 4
+#DEFINE_CONSTANT MAX_INTEGER_ENCODING_RESPONSE_SIZE 6
+#DEFINE_CONSTANT MAX_OCTET_STRING_SIZE 128
+#DEFINE_CONSTANT MAX_OCTET_STRING_RESPONSE_SIZE 132
+#DEFINE_CONSTANT MAX_OID_STRING_SIZE 128
+#DEFINE_CONSTANT MAX_OID_STRING_RESPONSE_SIZE 132
+#DEFINE_CONSTANT MAX_VARBIND_SIZE 256
+#DEFINE_CONSTANT MAX_VARBIND_RESPONSE_SIZE 260
+#DEFINE_CONSTANT MAX_PDU_SIZE 384
+#DEFINE_CONSTANT MAX_PDU_RESPONSE_SIZE 390
+#DEFINE_CONSTANT MAX_MSG_SIZE 512
+#DEFINE_CONSTANT MAX_MSG_RESPONSE_SIZE 520
+#DEFINE_CONSTANT MAX_SNMP_BUFFER 1024
+
+#DEFINE_CONSTANT TYPE_INTEGER 0x02
+#DEFINE_CONSTANT TYPE_OCTET_STRING 0x04
+#DEFINE_CONSTANT TYPE_NULL 0x05
+#DEFINE_CONSTANT TYPE_OID 0x06
+#DEFINE_CONSTANT TYPE_SEQUENCE 0x30
+#DEFINE_CONSTANT TYPE_IP_ADDRESS 0x40
+#DEFINE_CONSTANT TYPE_COUNTER 0x41
+#DEFINE_CONSTANT TYPE_GAUGE 0x42
+#DEFINE_CONSTANT TYPE_TIMERTICKS 0x43
+
+#DEFINE_CONSTANT TRUE 1
+#DEFINE_CONSTANT FALSE 0
+#DEFINE_CONSTANT QTY_OF_QUEUES 2
+#DEFINE_CONSTANT MAX_COMMAND_QUEUE_ITEMS 50
+#DEFINE_CONSTANT MAX_STATUS_QUEUE_ITEMS 50
+#DEFINE_CONSTANT MAX_COMMAND_SIZE 256
+#DEFINE_CONSTANT MAX_MODULES 50
+
+#HELP_PDF_FILE "SNMP Client Processor Module v1.1 Help.pdf"
+
+#DEFAULT_VOLATILE
+#ENABLE_STACK_CHECKING
+//#ENABLE_TRACE
+#ENCODING_ASCII
+
+/*******************************************************************************************
+  Include Libraries
+  (Uncomment and include additional libraries as needed)
+*******************************************************************************************/
+// #CRESTRON_LIBRARY ""
+// #USER_LIBRARY ""
+
+/*******************************************************************************************
+  DIGITAL, ANALOG and SERIAL INPUTS and OUTPUTS
+  (Uncomment and declare inputs and outputs as needed)
+*******************************************************************************************/
+DIGITAL_INPUT _SKIP_, _SKIP_, _SKIP_;
+
+DIGITAL_INPUT Connect, Disconnect, _SKIP_;
+ 
+// ANALOG_INPUT 
+BUFFER_INPUT From_Modules[50000];
+       
+DIGITAL_OUTPUT _SKIP_, _SKIP_, _SKIP_;
+              
+DIGITAL_OUTPUT Is_Communicating, Is_Initialized, _SKIP_;
+
+// ANALOG_OUTPUT 
+STRING_OUTPUT To_Modules[MAX_MODULES];
+
+/*******************************************************************************************
+  SOCKETS
+  (Uncomment and define socket definitions as needed)
+*******************************************************************************************/
+UDP_SOCKET snmpAgent[MAX_SNMP_BUFFER];
+/*******************************************************************************************
+  Parameters
+  (Uncomment and declare parameters as needed)
+*******************************************************************************************/
+INTEGER_PARAMETER Protocol;
+STRING_PARAMETER Community[100];
+STRING_PARAMETER IPAddress[100];
+/*******************************************************************************************
+  Parameter Properties
+  (Uncomment and declare parameter properties as needed)
+*******************************************************************************************/
+
+#BEGIN_PARAMETER_PROPERTIES Protocol
+   propValidUnits = unitDecimal;
+   propDefaultUnit = unitDecimal;
+   propDefaultValue = 0d;
+   propList = { 0d , "Version 1" };
+   propShortDescription = "SNMP Protocol Version";
+#END_PARAMETER_PROPERTIES
+
+#BEGIN_PARAMETER_PROPERTIES Community
+   propValidUnits = unitString;
+   propDefaultUnit = unitString;
+   propDefaultValue = "public";
+   propShortDescription = "SNMP Community";
+#END_PARAMETER_PROPERTIES
+
+#BEGIN_PARAMETER_PROPERTIES IPAddress
+   propValidUnits = unitString;
+   propDefaultUnit = unitString;
+   propDefaultValue = "0.0.0.0";
+   propShortDescription = "SNMP Agent IP Address";
+#END_PARAMETER_PROPERTIES
+
+/*******************************************************************************************
+  Structure Definitions
+  (Uncomment and define structure definitions as needed)
+  Note:  Be sure to initialize all declared STRING variables as needed
+         For example, in FUNCTION Main: struct.myString = "";
+*******************************************************************************************/
+STRUCTURE _SNMPMSG_VarBind
+{
+	INTEGER type;
+	STRING sValue[MAX_OCTET_STRING_SIZE];
+	LONG_INTEGER nValue;
+	SIGNED_LONG_INTEGER snValue;
+	STRING oid[MAX_OID_STRING_SIZE];
+};
+
+STRUCTURE _SNMPMsg_PDU
+{
+	LONG_INTEGER msgID;
+	LONG_INTEGER error;
+	LONG_INTEGER errorIndex;
+};
+
+STRUCTURE _SNMPMsg
+{
+	LONG_INTEGER version;
+	STRING community[50];
+};
+
+STRUCTURE _SNMPMsgItem
+{
+	INTEGER tag;
+	INTEGER length;
+	STRING data[MAX_MSG_SIZE];
+};
+
+STRUCTURE _ModuleComm
+{
+	INTEGER isRegistered;
+	INTEGER isInitialized;
+};
+
+STRUCTURE _CommQueue
+{
+	INTEGER nBusy;
+	INTEGER nHasItems;
+	INTEGER nCommandHead;
+	INTEGER nCommandTail;
+	INTEGER nStatusHead;
+	INTEGER nStatusTail;
+	INTEGER nStrikeCount;
+	INTEGER nResendLast;
+	STRING sLastMessage[MAX_MSG_SIZE];
+};
+
+_ModuleComm moduleComm[MAX_MODULES];
+
+_CommQueue queueComm;
+STRING sCommandQueue[MAX_COMMAND_QUEUE_ITEMS][MAX_MSG_SIZE];
+STRING sStatusQueue[MAX_STATUS_QUEUE_ITEMS][MAX_MSG_SIZE];
+
+_SNMPMsg parsedSNMPMsg;
+_SNMPMsg_PDU parsedSNMPMsg_PDU;
+_SNMPMsg_VarBind parsedSNMPMsg_VarBind;
+_SNMPMsgItem parsedSNMPMsgItem;
+/*******************************************************************************************
+  Global Variables
+  (Uncomment and declare global variables as needed)
+  Note:  Be sure to initialize all declared STRING variables as needed
+         For example, in FUNCTION Main: myString = "";
+*******************************************************************************************/
+INTEGER parsingDeviceBusy;
+STRING parsedDeviceMsg[MAX_MSG_SIZE];
+INTEGER responseMsgID;
+
+INTEGER parsingModuleBusy;
+STRING parsedModuleMsg[MAX_COMMAND_SIZE];
+STRING parsedModuleType[MAX_COMMAND_SIZE];
+STRING parsedModuleOID[MAX_COMMAND_SIZE];
+STRING parsedModuleValue[MAX_COMMAND_SIZE];
+STRING trash[100];
+INTEGER responseModuleMsgID;
+INTEGER parseStatus;
+
+INTEGER initModuleID;
+INTEGER regModuleID;
+INTEGER isInitializing;
+INTEGER isRegistering;
+INTEGER isHeartbeating;
+
+INTEGER isConnected;
+/*******************************************************************************************
+  FUNCTIONs
+  (Add any additional functions here)
+  Note:  FUNCTIONs must be physically placed before the location in
+         the code that calls them.
+*******************************************************************************************/
+
+////////////////////////////////////////////////////////////
+// DEBUGGER METHODS
+////////////////////////////////////////////////////////////
+STRING_FUNCTION PrintBytes(STRING value)
+{
+	STRING response[5000];
+	INTEGER I;         
+   
+	FOR (I = 1 TO LEN(value))
+	{
+		MakeString(response, "%s 0x%02x", response, BYTE(value, I));
+	}
+
+	return (response);
+}
+
+STRING_FUNCTION PrintDecBytes(STRING value)
+{
+	STRING response[5000];
+	INTEGER I;         
+   
+	FOR (I = 1 TO LEN(value))
+	{
+		MakeString(response, "%s %d", response, BYTE(value, I));
+	}
+
+	return (response);
+}
+        
+////////////////////////////////////////////////////////////
+// PARSER HELPERS
+////////////////////////////////////////////////////////////
+String_Function getBoundString(STRING source, STRING startString, STRING endString)
+{
+	INTEGER startIndex;
+	INTEGER endIndex;
+	STRING response[MAX_COMMAND_SIZE];
+                                     
+    response = "";
+
+	IF (LEN(source) > 0)
+	{
+		startIndex = FIND(startString, source);
+		endIndex = FIND(endString, source, startIndex + 1);
+	
+		IF (startIndex > 0 && startIndex < endIndex)
+		{
+			startIndex = startIndex + LEN(startString);
+				
+			response = MID(source, startIndex, endIndex - startIndex);
+		}
+	}
+
+	RETURN (response);
+}
+
+////////////////////////////////////////////////////////////
+// Initialize Helpers
+////////////////////////////////////////////////////////////  
+FUNCTION initQueue()
+{
+	queueComm.nBusy = FALSE;
+	queueComm.nHasItems = FALSE;
+	queueComm.nCommandHead = 1;
+	queueComm.nCommandTail = 1;
+	queueComm.nStatusHead = 1;
+	queueComm.nStatusTail = 1;
+	queueComm.nStrikeCount = 0;
+	queueComm.nResendLast = FALSE;
+	queueComm.sLastMessage = "";
+}
+
+FUNCTION initModules()
+{
+	INTEGER id;
+                                                
+	IF (isInitializing = FALSE)
+	{                                               
+		FOR (id = initModuleID to GetNumArrayRows(To_Modules))
+		{
+			IF (moduleComm[id].isRegistered && moduleComm[id].isInitialized = FALSE)
+			{
+				isInitializing = TRUE;
+                                                  
+				IF (IsSignalDefined(To_Modules[id]) = TRUE)
+					MakeString(To_Modules[id], "INIT<%d>", id);
+
+				initModuleID = id;
+				
+				BREAK;
+			}
+
+			IF (id = GetNumArrayRows(To_Modules) && isInitializing = FALSE)
+			{
+				initModuleID = id;
+				Is_Initialized = TRUE;
+			}
+		}
+	}
+}
+         
+FUNCTION reinit()
+{
+	INTEGER id;
+               
+	initModuleID = 1;
+	isInitializing = FALSE;
+	Is_Initialized = FALSE;
+
+	FOR (id = 1 to GetNumStructureArrayCols(moduleComm))
+		moduleComm[id].isInitialized = FALSE;
+}
+
+FUNCTION reset()
+{              
+	reinit();
+	initQueue();
+}
+                    
+////////////////////////////////////////////////////////////
+// Direct Sockets
+////////////////////////////////////////////////////////////
+FUNCTION SocketSendPacket(STRING packet)
+{
+	IF (isConnected = TRUE)
+		SocketSend(snmpAgent, packet);
+}
+                                                                  
+////////////////////////////////////////////////////////////
+// HELPER METHODS
+////////////////////////////////////////////////////////////
+Integer_Function startsWith(STRING MATCH_STRING, STRING SOURCE_STRING)
+{
+	RETURN (FIND(MATCH_STRING,SOURCE_STRING) = 1); 
+}
+
+Integer_Function contains(STRING MATCH_STRING, STRING SOURCE_STRING)
+{
+	RETURN (FIND(MATCH_STRING,SOURCE_STRING) > 0); 
+}
+
+Long_Integer_Function ATOL_Signed(STRING value)
+{
+	IF (startsWith("-", value))
+		RETURN (0-ATOL(value));
+	ELSE
+		RETURN (ATOL(value));
+}
+
+////////////////////////////////////////////////////////////
+// ENCODER PROCESS METHODS
+////////////////////////////////////////////////////////////
+STRING_FUNCTION Encode_SNMPLength(INTEGER length)
+{
+	STRING response[MAX_LENGTH_ENCODING_RESPONSE_SIZE];
+	STRING encoding[MAX_LENGTH_ENCODING_SIZE];
+
+	IF (length < 0x80)
+	{
+		MakeString(response, "%s", Chr(length)); 
+	}
+	ELSE
+	{
+		DO
+		{
+			MakeString(encoding, "%s%s", Chr(Low(length)), encoding);
+			
+			length = length >> 8;
+		}
+		UNTIL(length = 0);
+
+		MakeString(response, "%s%s", Chr(0x80 | Len(encoding)), encoding);	
+	}
+
+	RETURN (response);
+}
+                                       
+STRING_FUNCTION Encode_SNMPInteger(SIGNED_LONG_INTEGER value)
+{
+	STRING response[MAX_INTEGER_ENCODING_RESPONSE_SIZE];
+	STRING encoding[MAX_INTEGER_ENCODING_SIZE];   
+    LONG_INTEGER temp;
+                           
+	// casting to unsigned for bitwise operations.
+	temp = value;
+
+	encoding = "";
+
+	DO
+	{
+		MakeString(encoding, "%s%s", Chr(Low(temp)), encoding);
+		
+		temp = temp >> 8;
+	}
+	UNTIL(temp = 0);
+
+	MakeString(response, "%s%s%s", Chr(TYPE_INTEGER), Encode_SNMPLength(LEN(encoding)), encoding);
+
+	return (response);                   
+}
+
+STRING_FUNCTION Encode_SNMPOctetString(STRING value)
+{
+	STRING response[MAX_OCTET_STRING_RESPONSE_SIZE];
+                                                                           
+	IF (LEN(value) > (MAX_OCTET_STRING_SIZE))
+		MakeString(response,"%s%s%s",  Chr(TYPE_OCTET_STRING), Encode_SNMPLength(MAX_OCTET_STRING_SIZE), LEFT(value, MAX_OCTET_STRING_SIZE));
+	ELSE
+		MakeString(response,"%s%s%s",  Chr(TYPE_OCTET_STRING), Encode_SNMPLength(LEN(value)), value);
+
+	RETURN (response);	  
+}
+
+STRING_FUNCTION Encode_SNMPNull()
+{
+	STRING response[MAX_NULL_ENCODING_RESPONSE_SIZE];
+
+	MakeString(response, "\x05\x00");
+
+	return (response);
+}
+
+STRING_FUNCTION Encode_SNMPOID_Value(INTEGER value)
+{
+	STRING response[MAX_INTEGER_ENCODING_RESPONSE_SIZE];
+	INTEGER highByte;
+                           
+	highByte = 0x00;
+	response = "";
+
+	DO
+	{
+		MakeString(response, "%s%s", Chr(highByte | (value % 0x80)), response);
+
+		highByte = 0x80;
+		
+		value = value / 0x80;
+	}
+	UNTIL(value = 0);
+
+	return (response);
+}
+
+STRING_FUNCTION Encode_SNMPOID(STRING oid)
+{
+	STRING response[MAX_OID_STRING_RESPONSE_SIZE];
+	STRING encoded[MAX_OID_STRING_SIZE];
+	STRING trash[100];
+	INTEGER value;
+
+	response = "";
+	encoded = "";	
+
+	IF (LEN(oid) = 1)
+	{
+		MakeString(encoded, "%s", Chr(0x28));
+		oid = "";
+	}
+	ELSE IF (FIND("1.3.", oid) = 1)
+	{
+		MakeString(encoded, "%s", Chr(0x2b));
+	
+		trash = REMOVE("1.3.", oid);
+
+		WHILE (LEN(oid) > 0)
+		{
+			IF (FIND(".", oid) > 0)
+	         	value = ATOI(REMOVE(".", oid));
+			ELSE
+			{
+				value = ATOI(oid);
+	         	oid = "";
+			}
+	
+			MakeString(encoded, "%s%s", encoded, Encode_SNMPOID_Value(value));
+		}
+	}
+
+	MakeString(response, "%s%s%s", Chr(TYPE_OID), Encode_SNMPLength(Len(encoded)), encoded);		
+
+	RETURN (response);
+}
+       
+STRING_FUNCTION Encode_SNMPVarBind_Integer(STRING oid, SIGNED_LONG_INTEGER value)
+{
+	STRING response[MAX_VARBIND_RESPONSE_SIZE];
+	STRING encoded[MAX_VARBIND_SIZE];
+
+	MakeString(encoded, "%s%s", Encode_SNMPOID(oid), Encode_SNMPInteger(value));
+
+	MakeString(response, "%s%s%s", Chr(TYPE_SEQUENCE), Encode_SNMPLength(Len(encoded)), encoded);
+
+	return (response);
+}
+
+STRING_FUNCTION Encode_SNMPVarBind_String(STRING oid, STRING value)
+{
+	STRING response[MAX_VARBIND_RESPONSE_SIZE];
+	STRING encoded[MAX_VARBIND_SIZE];
+
+	MakeString(encoded, "%s%s", Encode_SNMPOID(oid), Encode_SNMPOctetString(value));
+
+	MakeString(response, "%s%s%s", Chr(TYPE_SEQUENCE), Encode_SNMPLength(Len(encoded)), encoded);
+
+	return (response);
+}
+
+STRING_FUNCTION Encode_SNMPVarBind_Null(STRING oid)
+{
+	STRING response[MAX_VARBIND_RESPONSE_SIZE];
+	STRING encoded[MAX_VARBIND_SIZE];
+
+	MakeString(encoded, "%s%s", Encode_SNMPOID(oid), Encode_SNMPNull());
+
+	MakeString(response, "%s%s%s", Chr(TYPE_SEQUENCE), Encode_SNMPLength(Len(encoded)), encoded);
+
+	return (response);
+}
+
+STRING_FUNCTION Encode_SNMPPDU(INTEGER msgType, INTEGER msgID, STRING varBind)
+{
+	STRING response[MAX_PDU_RESPONSE_SIZE];
+	STRING encoded[MAX_PDU_SIZE];
+
+	MakeString(encoded, "%s%s%s", Chr(TYPE_SEQUENCE), Encode_SNMPLength(Len(varBind)), varBind);
+
+	MakeString(encoded, "%s%s%s%s", Encode_SNMPInteger(msgID), Encode_SNMPInteger(0x00), Encode_SNMPInteger(0x00), encoded);
+
+	MakeString(response, "%s%s%s", Chr(msgType), Encode_SNMPLength(Len(encoded)), encoded);
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Encode_SNMPMsg(INTEGER msgType, INTEGER msgID, STRING varBind)
+{
+	STRING response[MAX_MSG_RESPONSE_SIZE];
+	STRING encoded[MAX_MSG_SIZE];
+
+	MakeString(encoded, "%s%s%s", Encode_SNMPInteger(Protocol), Encode_SNMPOctetString(Community), Encode_SNMPPDU(msgType, msgID, varBind));
+                  
+	MakeString(response, "%s%s%s", Chr(TYPE_SEQUENCE), Encode_SNMPLength(Len(encoded)), encoded);
+
+	RETURN (response);
+}
+ 
+////////////////////////////////////////////////////////////
+// ENCODER INITIATING METHODS
+////////////////////////////////////////////////////////////
+STRING_FUNCTION Encode_SNMPGet(INTEGER msgID, STRING oid)
+{
+	STRING response[MAX_MSG_RESPONSE_SIZE];
+
+	response = Encode_SNMPMsg(0xa0, msgID, Encode_SNMPVarBind_Null(oid));
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Encode_SNMPGetNext(INTEGER msgID, STRING oid)
+{
+	STRING response[MAX_MSG_RESPONSE_SIZE];
+
+	response = Encode_SNMPMsg(0xa1, msgID, Encode_SNMPVarBind_Null(oid));
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Encode_SNMPSet_String(INTEGER msgID, STRING oid, STRING value)
+{
+	STRING response[MAX_MSG_RESPONSE_SIZE];
+
+	response = Encode_SNMPMsg(0xa3, msgID, Encode_SNMPVarBind_String(oid, value));
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Encode_SNMPSet_Integer(INTEGER msgID, STRING oid, SIGNED_LONG_INTEGER value)
+{
+	STRING response[MAX_MSG_RESPONSE_SIZE];
+
+	response = Encode_SNMPMsg(0xa3, msgID, Encode_SNMPVarBind_Integer(oid, value));
+
+	RETURN (response);
+}
+                         
+////////////////////////////////////////////////////////////
+// DECODE PROCESS METHODS
+////////////////////////////////////////////////////////////
+SIGNED_LONG_INTEGER_FUNCTION Decode_SNMPInteger(_SNMPMsgItem item)
+{
+	SIGNED_LONG_INTEGER response;
+    LONG_INTEGER temp;
+	INTEGER I;
+
+	IF (item.tag = TYPE_INTEGER)
+	{
+		temp = 0;
+
+		FOR (I = 1 TO Len(item.data))
+		{
+			temp = temp + BYTE(item.data, I);
+
+			IF (I < Len(item.data))
+				temp = temp << 8;
+		}		
+
+		response = temp;
+	}
+
+	RETURN (response);
+}
+
+LONG_INTEGER_FUNCTION Decode_SNMPGauge(_SNMPMsgItem item)
+{
+	LONG_INTEGER response;
+	INTEGER I;
+
+	IF (item.tag = TYPE_GAUGE)
+	{
+		response = 0;
+
+		FOR (I = 1 TO Len(item.data))
+		{
+			response = response + BYTE(item.data, I);
+
+			IF (I < Len(item.data))
+				response = response << 8;
+		}		
+	}
+
+	RETURN (response);
+}
+
+LONG_INTEGER_FUNCTION Decode_SNMPCounter(_SNMPMsgItem item)
+{
+	LONG_INTEGER response;
+	INTEGER I;
+
+	IF (item.tag = TYPE_COUNTER)
+	{
+		response = 0;
+
+		FOR (I = 1 TO Len(item.data))
+		{
+			response = response + BYTE(item.data, I);
+
+			IF (I < Len(item.data))
+				response = response << 8;
+		}		
+	}
+
+	RETURN (response);
+}
+
+LONG_INTEGER_FUNCTION Decode_SNMPTimerTicks(_SNMPMsgItem item)
+{
+	LONG_INTEGER response;
+	INTEGER I;
+
+	IF (item.tag = TYPE_TIMERTICKS)
+	{
+		response = 0;
+
+		FOR (I = 1 TO Len(item.data))
+		{
+			response = response + BYTE(item.data, I);
+
+			IF (I < Len(item.data))
+				response = response << 8;
+		}		
+	}
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Decode_SNMPOctetString(_SNMPMsgItem item)
+{
+	STRING response[MAX_OCTET_STRING_SIZE];
+	STRING temp[MAX_MSG_SIZE];
+
+	IF (item.tag = 0x04)
+	{
+		temp = item.data;
+
+		IF (Len(temp) > MAX_OCTET_STRING_SIZE)
+			MakeString(response, "%s", LEFT(temp, MAX_OCTET_STRING_SIZE));		
+		ELSE
+			MakeString(response, "%s", temp);		
+	}
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Decode_SNMPIPAddress(_SNMPMsgItem item)
+{
+	STRING response[MAX_OCTET_STRING_SIZE];
+	INTEGER I;
+
+	IF (item.tag = TYPE_IP_ADDRESS)
+	{
+		response = "";
+
+		FOR (I = 1 TO Len(item.data))
+		{
+			IF (I < Len(item.data))
+				MakeString(response, "%s%s.", response, Itoa(Byte(item.data, I)));
+			ELSE
+				MakeString(response, "%s%s", response, Itoa(Byte(item.data, I)));
+		}
+	}
+
+	RETURN (response);
+}
+
+STRING_FUNCTION Decode_SNMPOID(_SNMPMsgItem item)
+{
+	STRING response[MAX_OID_STRING_SIZE];
+	INTEGER value;
+	INTEGER I;
+
+	IF (item.tag = TYPE_OID)
+	{
+		response = "";
+
+		FOR (I = 1 TO Len(item.data))
+		{
+			IF (I = 1 && Byte(item.data, I) = 0x2b)
+				response = "1.3";
+			ELSE IF (I = 1 && Byte(item.data, I) = 0x28)
+				response = "1";
+			ELSE
+			{
+				value = Byte(item.data, I);
+
+				//encoded?
+				IF ((value & 0x80) = 0x80)
+				{
+					// turn off bit
+					value = value ^ 0x80;
+					// next byte needed
+					I = I + 1;
+					value = ((value * 128) + Byte(item.data, I));
+				}
+				
+				MakeString(response, "%s%s", response, Itoa(value));
+			}
+
+			IF (I < Len(item.data))
+            	MakeString(response, "%s.", response);
+		}
+	}
+
+	RETURN (response);
+}
+
+FUNCTION Decode_SNMPVarBind_Value(_SNMPMsgItem item, _SNMPMsg_VarBind varbind)
+{
+	// null
+	if (item.tag = TYPE_NULL)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = "";
+		varbind.nValue = 0;
+		varbind.snValue = -1;
+	}	
+	// integer
+	else if (item.tag = TYPE_INTEGER)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = "";
+		varbind.nValue = 0;
+		varbind.snValue = Decode_SNMPInteger(item);
+	}	
+	// gauge
+	else if (item.tag = TYPE_GAUGE)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = "";
+		varbind.nValue = Decode_SNMPGauge(item);
+		varbind.snValue = -1;
+	}	
+	// counter
+	else if (item.tag = TYPE_COUNTER)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = "";
+		varbind.nValue = Decode_SNMPCounter(item);
+		varbind.snValue = -1;
+	}	
+	// timerTicks
+	else if (item.tag = TYPE_TIMERTICKS)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = "";
+		varbind.nValue = Decode_SNMPTimerTicks(item);
+		varbind.snValue = -1;
+	}	
+	// Octet String
+	else if (item.tag = TYPE_OCTET_STRING)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = Decode_SNMPOctetString(item);
+		varbind.nValue = 0;
+		varbind.snValue = -1;
+	}	
+	// IP Address 
+	else if (item.tag = TYPE_IP_ADDRESS)
+	{
+		varbind.type = item.tag;
+		varbind.sValue = Decode_SNMPIPAddress(item);
+		varbind.nValue = 0;
+		varbind.snValue = -1;
+	}	
+}
+
+INTEGER_FUNCTION Decode_SNMPLength(STRING buffer)
+{
+	INTEGER response;
+    INTEGER qty;
+	INTEGER I;
+                  
+	response = Byte(RemoveByLength(1, buffer), 1);	
+
+	IF ((response & 0x80) = 0x80)
+	{
+		qty = response ^ 0x80;
+
+		response = 0;
+
+		FOR (I = 1 TO qty)
+		{
+			response = response + Byte(RemoveByLength(1, buffer), 1);
+
+			IF (I < qty)
+				response = response << 8;
+		}
+	}
+
+	RETURN (response);
+}
+
+FUNCTION Decode_SNMPMsgItem(STRING buffer, _SNMPMsgItem item)
+{
+	INTEGER length;
+
+	item.tag = Byte(RemoveByLength(1, buffer), 1);
+	item.length = Decode_SNMPLength(buffer);
+	length = item.length;
+
+	IF (Len(buffer) >= length)
+		item.data = RemoveByLength(length, buffer);
+	ELSE
+		item.data = "";
+}
+
+INTEGER_FUNCTION Test_SNMPMsgItem(STRING buffer)
+{
+	INTEGER tag;
+	INTEGER length;
+	STRING temp[MAX_MSG_SIZE];
+
+	temp = buffer;
+
+	tag = Byte(RemoveByLength(1, temp), 1);
+
+	IF (tag = TYPE_SEQUENCE)
+	{
+		length = Decode_SNMPLength(temp);
+
+		IF (Len(temp) >= length)
+			RETURN (TRUE);
+	}
+	
+	RETURN (FALSE);
+}
+
+
+////////////////////////////////////////////////////////////
+// DECODE INITIALING METHODS
+////////////////////////////////////////////////////////////
+INTEGER_FUNCTION Decode_SNMPMsg(STRING buffer)
+{
+	INTEGER response;
+
+	STRING parse[MAX_MSG_SIZE];
+	INTEGER objectItem;
+	INTEGER item;
+
+	MakeString(parse, "%s", buffer);
+                         
+	ClearBuffer(buffer);
+
+	objectItem = 0;
+	item = 0;
+
+	response = false;
+
+	WHILE (Len(parse) > 0)
+	{
+		Decode_SNMPMsgItem(parse, parsedSNMPMsgItem);
+                  
+		// something has gone wrong, bailing!
+		IF (Len(parsedSNMPMsgItem.data) = 0)
+			break;
+
+		switch (objectItem)
+		{
+			// main sequence
+			case (0):
+			{
+				switch (item)
+				{
+					// get complete message
+					case (0):
+					{
+						parse = parsedSNMPMsgItem.data;
+						item = item + 1;
+					}
+					// get version
+					case (1):
+					{
+						parsedSNMPMsg.version = Decode_SNMPInteger(parsedSNMPMsgItem);
+						item = item + 1;
+					}
+					// get community
+					case (2):
+					{
+						parsedSNMPMsg.community = Decode_SNMPOctetString(parsedSNMPMsgItem);
+						item = item + 1;
+					}
+					// get pdu
+					case (3):
+					{
+						parse = parsedSNMPMsgItem.data;
+						item = 0;
+						objectItem = objectItem + 1;
+					}
+				}
+			}
+			// pdu sequence
+			case (1):
+			{
+				switch (item)
+				{
+					// get msgID
+					case (0):
+					{
+						parsedSNMPMsg_PDU.msgID = Decode_SNMPInteger(parsedSNMPMsgItem);
+						item = item + 1;
+					}
+					// get error
+					case (1):
+					{
+						parsedSNMPMsg_PDU.error = Decode_SNMPInteger(parsedSNMPMsgItem);
+						item = item + 1;
+					}
+					// get errorIndex
+					case (2):
+					{
+						parsedSNMPMsg_PDU.errorIndex = Decode_SNMPInteger(parsedSNMPMsgItem);
+						item = item + 1;
+					}
+					// get VarBindList
+					case (3):
+					{
+						parse = parsedSNMPMsgItem.data;
+						item = 0;
+						objectItem = objectItem + 1;
+					}
+				}
+			}
+			// varbind sequence
+			case (2):
+			{
+				switch (item)
+				{
+					// get first seqeunce
+					case (0):
+					{
+						parse = parsedSNMPMsgItem.data;
+						item = item + 1;
+					}
+					// get varbind oid
+					case (1):
+					{
+						parsedSNMPMsg_VarBind.oid = Decode_SNMPOid(parsedSNMPMsgItem);
+						item = item + 1;
+					}
+					// get varbind value
+					case (2):
+					{
+						Decode_SNMPVarBind_Value(parsedSNMPMsgItem, parsedSNMPMsg_VarBind);
+						item = 0;
+						objectItem = 0;
+						parse = "";
+						response = true;
+					}
+				}
+			}
+		}
+    }
+
+	return(response);
+}
+
+////////////////////////////////////////////////////////////
+// Queue Method Helpers
+////////////////////////////////////////////////////////////
+Integer_FUNCTION isQueueEmpty()
+{
+	RETURN (queueComm.nHasItems = FALSE && queueComm.nBusy = FALSE);
+}
+
+String_FUNCTION deQueue()
+{
+	STRING sResponse[MAX_MSG_SIZE];
+                                       
+	sResponse = "";
+
+	IF (queueComm.nHasItems = TRUE && queueComm.nBusy = FALSE)
+	{         
+		queueComm.nBusy = TRUE;
+
+		// Priority Queue has items
+		IF (queueComm.nCommandHead != queueComm.nCommandTail)
+		{
+			IF (queueComm.nCommandTail = GetNumArrayRows(sCommandQueue))
+				queueComm.nCommandTail = 1;
+			ELSE
+				queueComm.nCommandTail = queueComm.nCommandTail + 1;
+
+			queueComm.sLastMessage = sCommandQueue[queueComm.nCommandTail];
+		}
+		// Secondary Queue has items
+		ELSE IF (queueComm.nStatusHead != queueComm.nStatusTail)
+		{
+			IF (queueComm.nStatusTail = GetNumArrayRows(sStatusQueue))
+				queueComm.nStatusTail = 1;
+			ELSE
+				queueComm.nStatusTail = queueComm.nStatusTail + 1;
+
+			queueComm.sLastMessage = sStatusQueue[queueComm.nStatusTail];
+		}
+	
+		IF (queueComm.nCommandHead = queueComm.nCommandTail && queueComm.nStatusHead = queueComm.nStatusTail)
+			queueComm.nHasItems = FALSE;          
+        
+		sResponse = queueComm.sLastMessage;
+	}
+
+	RETURN (sResponse);
+}
+
+FUNCTION sendNextQueueItem()
+{
+	STRING sOutgoing[MAX_MSG_SIZE];
+     
+	IF (queueComm.nResendLast = TRUE)
+	{
+		queueComm.nResendLast = FALSE;
+		sOutgoing = queueComm.sLastMessage;
+	}
+	ELSE
+	{                                     
+		sOutgoing = deQueue();
+	}
+
+	IF (LEN(sOutgoing) > 0)
+	{
+		SocketSendPacket(sOutgoing);
+         
+		WAIT (500, QueueFalseResponse)
+		{
+			IF (queueComm.nBusy = TRUE)
+			{
+				IF (queueComm.nStrikeCount < 3)
+				{
+					queueComm.nStrikeCount = queueComm.nStrikeCount + 1;
+
+					trace("!!!FAILED Response");
+	
+					queueComm.nResendLast = TRUE;
+	
+					sendNextQueueItem();
+				}
+				ELSE
+				{
+					Is_Communicating = FALSE;
+					reset();
+				}
+			}
+		}
+	}
+}
+
+FUNCTION enQueue(STRING sCmd, INTEGER bPriority)
+{
+	INTEGER nQueueWasEmpty;
+	
+	nQueueWasEmpty = isQueueEmpty();
+
+	IF (bPriority = TRUE)
+	{
+		IF (queueComm.nCommandHead = GetNumArrayRows(sCommandQueue))
+		{
+			IF (queueComm.nCommandTail != 1)
+			{
+				queueComm.nCommandHead = 1;
+				sCommandQueue[queueComm.nCommandHead] = sCmd;
+				queueComm.nHasItems = TRUE;
+			}
+		}
+		ELSE IF (queueComm.nCommandTail != (queueComm.nCommandHead + 1))
+		{
+			queueComm.nCommandHead = queueComm.nCommandHead + 1;
+			sCommandQueue[queueComm.nCommandHead] = sCmd;
+			queueComm.nHasItems = TRUE;
+		}
+	}
+	ELSE
+	{
+		IF (queueComm.nStatusHead = GetNumArrayRows(sStatusQueue))
+		{
+			IF (queueComm.nStatusTail != 1)
+			{
+				queueComm.nStatusHead = 1;
+				sStatusQueue[queueComm.nStatusHead] = sCmd;
+				queueComm.nHasItems = TRUE;
+			}
+		}
+		ELSE IF (queueComm.nStatusTail != (queueComm.nStatusHead + 1))
+		{
+			queueComm.nStatusHead = queueComm.nStatusHead + 1;
+			sStatusQueue[queueComm.nStatusHead] = sCmd;
+			queueComm.nHasItems = TRUE;
+		}
+	}
+
+	IF (nQueueWasEmpty)
+		sendNextQueueItem();
+}
+
+
+FUNCTION goodResponse()
+{
+	trace("GOOD Response!");
+
+	queueComm.nBusy = FALSE;
+
+	CANCELWAIT(QueueFalseResponse);
+
+	queueComm.nStrikeCount = 0;
+
+	queueComm.nResendLast = FALSE;
+
+	Is_Communicating = TRUE;
+                        
+	sendNextQueueItem();
+}
+
+////////////////////////////////////////////////////////////
+// Module Comm Helper Methods
+//////////////////////////////////////////////////////////// 
+FUNCTION packModuleResponse(_SNMPMsg_PDU pdu, _SNMPMsg_VarBind varbind)
+{
+	STRING value[MAX_OCTET_STRING_SIZE];
+	STRING type[50];
+
+	IF (pdu.msgID > 0 && pdu.msgID <= MAX_MODULES)
+	{
+		switch (varbind.type)
+        {
+			case (TYPE_INTEGER):
+			{
+				value = LTOA(varbind.snValue);
+				type = "INTEGER";
+			}
+			case (TYPE_OCTET_STRING):
+			{
+				value = varbind.sValue;
+				type = "STRING";
+			}
+			case (TYPE_IP_ADDRESS):
+			{
+				value = varbind.sValue;
+				type = "IP_ADDRESS";
+			}
+			case (TYPE_COUNTER):
+			{
+				value = LTOA(varbind.nValue);
+				type = "COUNTER";
+			}
+			case (TYPE_GAUGE):
+			{
+				value = LTOA(varbind.nValue);
+				type = "GAUGE";
+			}
+			case (TYPE_TIMERTICKS):
+			{
+				value = LTOA(varbind.nValue);
+				type = "TIMERTICKS";
+			}
+        }
+
+		MakeString(To_Modules[pdu.msgID],"RESPONSE<%s|%s|%s>",type, varbind.oid, value);
+	}	
+}
+     
+FUNCTION buildSNMPMessageSet(integer id, string type, string oid, string value)
+{
+	string out[MAX_MSG_SIZE];
+
+	IF (type = "INTEGER")
+	{
+		out = Encode_SNMPSet_Integer(id, oid, ATOL_Signed(value));
+	}
+	ELSE IF (type = "STRING")
+	{
+		out = Encode_SNMPSet_String(id, oid, value);
+	}
+                                    
+	IF (Len(out) > 0)
+		enQueue(out, TRUE);
+}
+ 
+////////////////////////////////////////////////////////////
+// Heartbeat Helpers
+//////////////////////////////////////////////////////////// 
+FUNCTION sendHeartbeat()
+{
+	STRING outgoingMsg[MAX_MSG_SIZE];
+
+	IF (isHeartbeating = TRUE)
+	{
+		IF (isQueueEmpty())
+		{
+			outgoingMsg = Encode_SNMPGetNext(0, "1");
+                                                         
+			enQueue(outgoingMsg, false);
+		}
+
+		WAIT (3000, HEARTBEAT)
+		{
+			IF (isHeartbeating = TRUE)
+				sendHeartbeat();
+		}
+	}
+}
+
+FUNCTION startHeartbeat()
+{
+	IF (isHeartbeating = FALSE)
+	{
+		isHeartbeating = TRUE;
+
+		sendHeartbeat();
+	}
+}
+
+FUNCTION stopHeartbeat()
+{
+	isHeartbeating = FALSE;
+
+	CANCELWAIT(HEARTBEAT);
+}
+                                  
+////////////////////////////////////////////////////////////
+// Registration Helpers
+//////////////////////////////////////////////////////////// 
+Function registrationProcess()
+{
+	IF (regModuleID < GetNumArrayRows(To_Modules))
+	{
+		regModuleID = regModuleID + 1;
+    
+		IF (IsSignalDefined(To_Modules[regModuleID]) = TRUE)
+			MakeString(To_Modules[regModuleID], "REGISTER<%d>", regModuleID);
+
+		WAIT (10, RegistrationWait)
+		{
+			IF (isRegistering)
+				registrationProcess();
+		}
+	}
+	ELSE
+	{
+		isRegistering = FALSE;
+
+		IF (Connect = TRUE)
+			startHeartbeat();
+	}
+}
+
+Function startRegistration()
+{
+	IF (isRegistering = FALSE)
+	{
+		isRegistering = TRUE;
+		regModuleID = 0;
+		registrationProcess();
+	}
+}
+
+Function stopRegistration()
+{
+	CancelWait(RegistrationWait);
+	isRegistering = FALSE;
+}
+
+/*******************************************************************************************
+  Event Handlers
+  (Uncomment and declare additional event handlers as needed)
+*******************************************************************************************/
+PUSH Connect
+{
+	SIGNED_INTEGER status;
+
+	reset();
+	CANCELWAIT(QueueFalseResponse);
+	
+	status = SocketUDP_Enable(snmpAgent, IPAddress, 161);
+
+	IF (status = 0)
+	{
+		isConnected = TRUE;
+         
+		// give registration a chance to start if this has been forced to a "1"
+		WAIT(500, StartHeartBeatProcess)
+        {     
+			IF (isRegistering = FALSE)
+			{
+				startHeartbeat();
+			}
+		}
+	}
+}
+
+PUSH Disconnect
+{
+	CANCELWAIT(StartHeartBeatProcess);
+
+	reset();
+	CANCELWAIT(QueueFalseResponse);
+
+	SocketUDP_Disable(snmpAgent);
+	isConnected = FALSE;
+
+	Is_Communicating = FALSE;
+	stopHeartbeat();
+
+	ClearBuffer(snmpAgent.SocketRxBuf);
+	
+}
+
+SOCKETRECEIVE snmpAgent
+{
+	IF (parsingDeviceBusy = FALSE)
+	{
+		parsingDeviceBusy = TRUE;
+
+		IF (Test_SNMPMsgItem(snmpAgent.SocketRxBuf) = TRUE)
+		{
+			parseStatus = Decode_SNMPMsg(snmpAgent.SocketRxBuf);
+                          			                                                            
+			IF (parsedSNMPMsg_PDU.error = 0 && parseStatus = TRUE)
+			{
+				// HEARBEAT MESSAGE
+				IF (parsedSNMPMsg_PDU.msgID = 0)		
+				{
+					GoodResponse();
+
+					IF (Is_Initialized = FALSE)
+						initModules();
+				}
+				ELSE
+					packModuleResponse(parsedSNMPMsg_PDU, parsedSNMPMsg_VarBind);
+			}
+			// ERROR MESSAGE
+			ELSE
+			{
+				TRACE ("ERROR: %ld", parsedSNMPMsg_PDU.error);
+				GoodResponse();
+			}	      
+		}
+		ELSE
+			ClearBuffer(snmpAgent.SocketRxBuf);
+	
+		parsingDeviceBusy = FALSE;
+	}
+}
+
+CHANGE From_Modules
+{
+	IF (parsingModuleBusy = FALSE)
+	{
+		parsingModuleBusy = TRUE;
+    
+		WHILE(TRUE)
+		{    
+			parsedModuleMsg = Gather(">", From_Modules);
+                                                                  
+			IF (LEN(parsedModuleMsg) > 0)
+			{
+				//GET<ID|OID>
+				IF (contains("GET", parsedModuleMsg))
+				{
+					responseModuleMsgID = ATOI(getBoundString(parsedModuleMsg,"<","|"));
+
+					IF (responseModuleMsgID > 0 && responseModuleMsgID <= GetNumStructureArrayCols(moduleComm))
+					{
+						parsedModuleOID = getBoundString(parsedModuleMsg,"|",">");
+						enQueue(Encode_SNMPGet(responseModuleMsgID, parsedModuleOID), FALSE);
+					}
+				}
+				//SET<ID|TYPE|OID|VALUE>
+				ELSE IF (contains("SET", parsedModuleMsg))
+				{
+					responseModuleMsgID = ATOI(getBoundString(parsedModuleMsg,"<","|"));
+
+					IF (responseModuleMsgID > 0 && responseModuleMsgID <= GetNumStructureArrayCols(moduleComm))
+					{
+						parsedModuleType = getBoundString(parsedModuleMsg,"|","|");
+						TRASH = REMOVE("|",parsedModuleMsg);
+	
+						parsedModuleOID = getBoundString(parsedModuleMsg,"|","|");
+						TRASH = REMOVE("|",parsedModuleMsg);
+	
+						parsedModuleValue = getBoundString(parsedModuleMsg,"|",">");
+	
+						buildSNMPMessageSet(responseModuleMsgID, parsedModuleType, parsedModuleOID, parsedModuleValue);
+					}
+				}
+				//RESPONSE_OK<ID>
+				ELSE IF (contains("RESPONSE_OK", parsedModuleMsg))
+                {
+					responseModuleMsgID = ATOI(getBoundString(parsedModuleMsg,"<",">"));
+
+					IF (responseModuleMsgID > 0 && responseModuleMsgID <= GetNumStructureArrayCols(moduleComm))
+					{
+						// Slowwwing... Seems the responses comes back way fast and sending
+						// messages so close to each other is locking up the UDP Socket.
+						Wait(20)
+							goodResponse();
+					}	
+				}
+				//INIT_DONE<ID>
+				ELSE IF (contains("INIT_DONE", parsedModuleMsg))
+				{
+					isInitializing = FALSE;
+
+					responseModuleMsgID = ATOI(getBoundString(parsedModuleMsg,"<",">"));
+
+					IF (responseModuleMsgID > 0 && responseModuleMsgID <= GetNumStructureArrayCols(moduleComm))
+					{
+						moduleComm[responseModuleMsgID].isInitialized = TRUE;
+					}
+
+					initModules();
+				}
+				//REGISTER<ID>
+				ELSE IF (contains("REGISTER", parsedModuleMsg))
+				{
+					responseModuleMsgID = ATOI(getBoundString(parsedModuleMsg,"<",">"));
+					
+					IF (responseModuleMsgID > 0 && responseModuleMsgID <= GetNumStructureArrayCols(moduleComm))
+					{
+						moduleComm[responseModuleMsgID].isRegistered = TRUE;
+					}
+				}
+			}
+  		}
+             
+		parsingModuleBusy = FALSE;
+	}
+}
+
+
+/*******************************************************************************************
+  Main()
+  Uncomment and place one-time startup code here
+  (This code will get called when the system starts up)
+*******************************************************************************************/
+
+FUNCTION Main()
+{
+	parsingDeviceBusy = FALSE;
+	parsingModuleBusy = FALSE;
+                               
+	Is_Communicating = FALSE;
+
+	isConnected = FALSE;
+
+	isRegistering = FALSE;	
+
+	parseStatus = FALSE;
+
+	reset();
+
+    WaitForInitializationComplete();
+	startRegistration();
+}

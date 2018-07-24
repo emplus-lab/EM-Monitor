@@ -1,0 +1,359 @@
+/*
+Dealer Name:Crestron
+System Name:
+System Number:
+Programmer:JMG
+Comments:
+*/
+
+//Compiler Directives
+#SYMBOL_NAME "Barco F-Series Processor"
+#CATEGORY "24" // TV/Video Projector
+#DEFAULT_NONVOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+
+#Define_Constant ciMAXSIZE 20
+#Define_Constant ciPollSize 5       	//Indicates # of attributes to poll for aside from picture settings
+#Define_Constant ciPollPicSize 4		//Indicates # of Picture attributes to poll for		
+
+#HELP_BEGIN
+   This module is for use inside the Barco F50 Projector Full Control module only.
+#HELP_END
+
+
+//Include Libraries
+
+//#Includepath
+//#User_SimpSharp_Library
+
+//IO Variables
+Digital_Input Poll, Poll_Picture ;   //Polling Digitals
+
+Analog_Input Input_Value, Aspect_Value, Gamma_Value,Contrast_In,Brightness_In,Saturation_In;
+
+Buffer_Input Queue$[150],From_Device$[150];
+
+Analog_Output Power_Status,Input_Status, PictureMute_Status, Freeze_Status, Aspect_Status, Gamma_Status, Brightness_Level, Saturation_Level, Contrast_Level, Lamp_Hours;
+
+String_Output To_Device$;
+
+String_Parameter Address[3];
+
+
+
+//Global Variables
+integer giNext, 			//Next CMD to Send
+		giStore,			//Next Command to Store
+		gitoSend,			//Commands in Que 1 or 0
+		giPollNext,
+		giPoll_Picture,			//Poll is active
+		giCNTR_Hold;
+string CMD_Que[150][50];
+string gsPollCMD[ciPollSize][50];
+String gsPoll_Picture[ciPollPicSize][50];
+
+//Events
+Push Poll
+{
+	if(Power_Status = 3)	//Send Que CMDS or Poll all
+	{
+
+ 			If(giStore <> giNext)
+				{	
+					to_device$ = CMD_Que[giNext];
+					giNext = giNext + 1;
+					if(giNext > ciMAXSIZE)
+						giNext = 1;
+							
+					if(giNext = giStore)
+						gitoSend = 0;						
+				}
+			else if(Poll_Picture = 0)
+				{
+         			if(giPollNext <> ciPollSize)
+					{
+                		to_device$ = ":" + Address + " " + gsPollCMD[giPollNext] + "\r";
+                		giPollNext = giPollNext + 1;
+					}
+					else
+					{		
+             			giPollNext = 1;
+                		to_device$ = ":" + Address + " " + gsPollCMD[giPollNext] + "\r";
+						giPollNext = giPollNext + 1;
+					}
+
+				}
+			else
+				{
+         			if(giPollNext <> ciPollSize)
+					{
+                		to_device$ = ":" + Address + " " + gsPollCMD[giPollNext] + "\r";
+                		giPollNext = giPollNext + 1;
+					}
+					else if(giPoll_Picture <> ciPollPicSize)
+					{
+             			to_device$ = ":" + Address + " " + gsPoll_Picture[giPoll_Picture] + "\r";
+						giPoll_Picture = giPoll_Picture + 1;
+            		}
+					else
+					{
+             			giPollNext = 1;
+						to_device$ = ":" + Address + " " + gsPollCMD[giPollNext] + "\r";			
+						giPollNext = giPollNext + 1;
+						giPoll_Picture = 1;
+					}
+			}
+		}
+	else			//Poll Power Only
+	{
+        to_device$ = ":" + Address + " " + gsPollCMD[1] + "\r";
+	}
+	
+
+}
+
+Change Input_Value
+{
+	string InCMD[50];
+
+    InCMD = ": " + Address + " " + "IABS" + itoa(Input_Value) + "\r";
+
+	CMD_Que[giStore] = InCMD;
+		
+	giStore = giStore + 1;
+	if(giStore > ciMAXSIZE)
+	{		
+     	giStore = 1;
+
+	}
+	if(giStore <> giNext)
+	{
+     		gitoSend = 1;
+	}
+
+}
+Change Aspect_Value
+{
+	string InCMD[50];
+
+    InCMD = ": " + Address + " " + "SABS" + itoa(Aspect_Value) + "\r";
+
+	CMD_Que[giStore] = InCMD;
+		
+	giStore = giStore + 1;
+	if(giStore > ciMAXSIZE)
+	{		
+     	giStore = 1;
+
+	}
+	if(giStore <> giNext)
+	{
+     		gitoSend = 1;
+	}
+
+}
+Change Gamma_Value
+{
+	string InCMD[50];
+
+    InCMD = ": " + Address + " " + "GABS" + itoa(Gamma_Value) + "\r";
+
+	CMD_Que[giStore] = InCMD;
+		
+	giStore = giStore + 1;
+	if(giStore > ciMAXSIZE)
+	{		
+     	giStore = 1;
+
+	}
+	if(giStore <> giNext)
+	{
+     		gitoSend = 1;
+	}
+
+}
+Change Contrast_In
+{
+	string InCMD[50];
+
+    InCMD = ": " + Address + " " + "CNTR " + itoa(Contrast_In) + "\r";
+
+	to_device$ = InCMD;
+		
+
+}
+Change Brightness_In
+{
+	string InCMD[50];
+
+    InCMD = ": " + Address + " " + "BRIG " + itoa(Brightness_In) + "\r";
+
+	to_device$ = InCMD;
+		
+
+}
+Change Saturation_In
+{
+	string InCMD[50];
+
+    InCMD = ": " + Address + " " + "CSAT " + itoa(Saturation_In) + "\r";
+
+	to_device$ = InCMD;
+		
+
+}
+
+
+Change Queue$
+{
+	
+	while(find("\x0D",Queue$))
+	{
+		//gitoSend = 
+		CMD_Que[giStore] = remove("\x0D",Queue$);
+		//trace("%s",CMD_Que[giStore]);
+		giStore = giStore + 1;
+		if(giStore > ciMAXSIZE)
+		{		
+     		giStore = 1;
+
+		}
+		if(giStore <> giNext)
+		{
+     		gitoSend = 1;
+		}
+	}	
+ 	
+}
+
+Change From_Device$
+{	
+	string sTempIn[200];
+	string sTempValue[50];
+	integer iloc1,iloc2;
+
+
+	while(find("\x0D",From_Device$) > 2)
+	{
+			
+	sTempIn = remove("\x0D",From_Device$);
+
+	if(find("!",sTempIn) = 0 && find(chr(37),sTempIn) > 0)    //! Indicates Command Error 
+	{
+		if(find("POWR",sTempIn) > 0 || find("POST",sTempIn) > 0)		//Power Response
+		{
+     		iloc1 = find("P",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Power_Status = atoi(sTempValue);
+		}
+		if(find("IABS",sTempIn) > 0)									//Input Response
+		{
+         	iloc1 = find("IABS",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Input_Status = atoi(sTempValue);
+		}
+		if(Find("PMUT",sTempIn) > 0)									//Picture Mute
+		{
+            iloc1 = find("PMUT",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			PictureMute_Status = atoi(sTempValue);
+		}
+		if(Find("FRZE",sTempIn) > 0)									//Freeze
+		{
+            iloc1 = find("FRZE",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Freeze_Status = atoi(sTempValue);
+		}
+		if(Find("SABS",sTempIn) > 0)									//Scaling
+		{
+            iloc1 = find("SABS",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Aspect_Status = atoi(sTempValue);
+		}
+		if(Find("CSAT",sTempIn) > 0)									//Saturation
+		{
+            iloc1 = find("CSAT",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Saturation_Level = atoi(sTempValue);
+		}
+		if(Find("CNTR",sTempIn) > 0)									//Contrast
+		{
+			
+            iloc1 = find("CNTR",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Contrast_Level = atoi(sTempValue);
+			
+		}
+		if(Find("BRIG",sTempIn) > 0)									//Brightness
+		{
+            iloc1 = find("BRIG",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Brightness_Level = atoi(sTempValue);
+		}
+		if(Find("GABS",sTempIn) > 0)									//Gamma
+		{
+            iloc1 = find("GABS",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Gamma_Status = atoi(sTempValue);
+		}
+		if(Find("LTR1",sTempIn) > 0)									//Lamp Hours
+		{
+            iloc1 = find("LTR1",sTempIn) + 5;
+			iloc2 = find("\x0D",sTempin,iloc1);
+			sTempValue = mid(sTempIn,iloc1,iloc2 - iloc1);
+			Lamp_Hours = atoi(sTempValue);
+		}
+		
+		
+	}
+	}
+
+
+}
+
+Function Main()
+{
+    // TODO:  Add code here
+    // Initialize declared global and local variables/arrays as needed.
+	gitoSend = 0;
+	giStore = 1;
+	giNext = 1;
+	giPollNext = 1;
+	giPoll_Picture = 1;
+
+
+
+	gsPollCMD[1] = "POST?"; //Power
+	gsPollCMD[2] = "IABS?"; //Source
+    gsPollCMD[3] = "PMUT?"; //Pic Mute
+    gsPollCMD[4] = "FRZE?"; //Freeze
+    gsPollCMD[5] = "SABS?"; //Aspect
+//	gsPollCMD[6] = "LTR1?"; //Lamp Time
+
+	gsPoll_Picture[1] = "CNTR?"; //Contrast
+	gsPoll_Picture[2] = "BRIG?"; //Brightness
+	gsPoll_Picture[3] = "CSAT?"; //Saturation
+	gsPoll_Picture[4] = "GABS?"; //GAmma
+	
+	WaitForInitializationComplete();
+
+	 
+
+	
+    // If you are reading any Input or Output variables, uncomment
+    //   the WaitForInitializationComplete statement above and read
+    //   them afterwards.  Input/Output variables will not have
+    //   their correct values set until after the logic processor
+    //   runs and propagates the values to them.
+}
+
