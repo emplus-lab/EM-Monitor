@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='ISO-8859-1' ?>
 <File Type='Manifest' Version='6.1.0' ObjectDisplayList='4'>
-<Project FileName='EM-Monitor.zip' Size='6397070' Build='20180814143811'>
+<Project FileName='EM-Monitor.zip' Size='6402514' Build='20180817115210'>
 <Sources>
-<Source FileName='EM-Monitor.xml' Size='538' Type='Application' Build='20180814143811' MinimumSGVersion='2.11.05.00' />
+<Source FileName='EM-Monitor.xml' Size='538' Type='Application' Build='20180817115210' MinimumSGVersion='2.11.05.00' />
 </Sources>
 </Project>
 </File>

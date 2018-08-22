@@ -91,8 +91,6 @@ namespace UserModule_SNMP_PDU_STRING_DECODE
 
 public override void LogosSplusInitialize()
 {
-    SocketInfo __socketinfo__ = new SocketInfo( 1, this );
-    InitialParametersClass.ResolveHostName = __socketinfo__.ResolveHostName;
     _SplusNVRAM = new SplusNVRAM( this );
     
     IN = new InOutArray<DigitalInput>( 8, this );

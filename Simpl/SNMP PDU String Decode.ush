@@ -20,8 +20,8 @@
   Name=SNMP PDU Byte-String Decoder
   SmplCName=SNMP PDU String Decode.usp
   Code=1
-  SysRev5=3.083
-  SMWRev=2.02.05
+  SysRev5=4.000
+  SMWRev=3.00.00
   InputCue1=In[1]
   InputSigType1=Digital
   InputCue2=In[2]
